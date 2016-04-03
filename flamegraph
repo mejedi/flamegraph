@@ -1,0 +1,93 @@
+#!/usr/bin/env python
+#
+# Pass arguments to perf-record (almost) as-is.
+#
+# Collect samples with perf, render flamegraph, upload it and print
+# public URI.
+#
+
+import sys, tempfile, subprocess, os, pwd, grp, json, urlparse
+
+def bundled(util):
+    return os.path.join(os.path.dirname(os.readlink(__file__)), util)
+
+# collect samples
+perf_record_out = tempfile.NamedTemporaryFile()
+
+args = sys.argv[1:]
+try:
+    dashdash = args.index('--')
+except ValueError:
+    dashdash = -1
+args[dashdash:dashdash] = ['-g', '-o', perf_record_out.name]
+
+try:
+    subprocess.check_call(['/usr/bin/perf', 'record'] + args)
+except subprocess.CalledProcessError as ex:
+    sys.exit(ex.returncode) # user passed incorrect arguments to perf
+
+print('Processing samples...')
+
+perf_script_out = subprocess.check_output([
+    '/usr/bin/perf', 'script', '-i', perf_record_out.name])
+
+perf_record_out.close() # unlinks
+del perf_record_out
+
+# unsudo now
+if os.getuid() == 0:
+    sudo_uid = os.getenv('SUDO_UID')
+    next_uid = sudo_uid and int(sudo_uid) or pwd.getpwnam('nobody').pw_uid
+    sudo_gid = os.getenv('SUDO_GID')
+    next_gid = sudo_gid and int(sudo_gid) or grp.getgrnam('nogroup').gr_gid
+    os.setgroups([])
+    os.setgid(next_gid)
+    os.setuid(next_uid)
+
+# collapse stacks
+collapse_util = subprocess.Popen([
+    bundled('FlameGraph/stackcollapse-perf.pl')],
+    stdin = subprocess.PIPE, stdout = subprocess.PIPE)
+
+samples, _ = collapse_util.communicate(perf_script_out)
+del perf_script_out
+
+if samples == '':
+    sys.stderr.write('no relevant samples captured, exiting\n')
+    sys.exit(-1)
+
+# render SVG
+title = ' '.join(sys.argv)
+render_util = subprocess.Popen([
+    bundled('FlameGraph/flamegraph.pl'), '--title', title],
+    stdin = subprocess.PIPE, stdout = subprocess.PIPE)
+
+svg, _ = render_util.communicate(samples)
+
+# upload
+api_request = json.dumps({
+    'description': title,
+    'public': True,
+    'files': {
+        'g.svg': {'content': svg},
+        'samples.txt': {'content': samples}
+    }
+})
+
+upload_util = subprocess.Popen([
+    '/usr/bin/curl', '-sd', '@/dev/fd/0', 'https://api.github.com/gists'],
+    stdin = subprocess.PIPE, stdout = subprocess.PIPE)
+
+api_response, _ = upload_util.communicate(api_request)
+
+try:
+    raw_url = json.loads(api_response)['files']['g.svg']['raw_url']
+except KeyError:
+    print(api_response)
+    sys.exit(-1)
+
+# s/gist.githubusercontent.com/gist.githack.com/
+# github serves raw files as text/plain
+raw_url_parts = list(urlparse.urlparse(raw_url))
+raw_url_parts[1] = u'gist.githack.com'
+print(urlparse.urlunparse(raw_url_parts))
