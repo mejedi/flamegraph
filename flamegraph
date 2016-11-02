@@ -9,7 +9,7 @@
 import sys, tempfile, subprocess, os, pwd, grp, json, urlparse
 
 def bundled(util):
-    return os.path.join(os.path.dirname(os.readlink(__file__)), util)
+    return os.path.join(os.path.dirname(os.readlink(__file__) if os.path.islink(__file__) else __file__), util)
 
 # collect samples
 perf_record_out = tempfile.NamedTemporaryFile()
