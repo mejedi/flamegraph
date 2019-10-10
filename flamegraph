@@ -11,6 +11,15 @@ import sys, tempfile, subprocess, os, pwd, grp, json, urlparse
 def bundled(util):
     return os.path.join(os.path.dirname(os.readlink(__file__) if os.path.islink(__file__) else __file__), util)
 
+# ensure we have GitHub API token
+api_token = os.getenv('FLAMEGRAPH_API_TOKEN')
+if not api_token:
+    sys.stderr.write('FLAMEGRAPH_API_TOKEN not set, exiting\n')
+    sys.stderr.write('Note: token needed to upload a Gist to GitHub\n')
+    if os.getenv('SUDO_USER'):
+        sys.stderr.write('Use "sudo -E" to preserve environment variables.\n')
+    sys.exit(-1)
+
 # collect samples
 perf_record_out = tempfile.NamedTemporaryFile()
 
@@ -75,7 +84,7 @@ api_request = json.dumps({
 })
 
 upload_util = subprocess.Popen([
-    '/usr/bin/curl', '-sd', '@/dev/fd/0', 'https://api.github.com/gists'],
+    '/usr/bin/curl', '-H', 'Authorization: token ' + api_token, '-sd', '@/dev/fd/0', 'https://api.github.com/gists'],
     stdin = subprocess.PIPE, stdout = subprocess.PIPE)
 
 api_response, _ = upload_util.communicate(api_request)
