@@ -31,9 +31,16 @@ except ValueError:
 args[dashdash:dashdash] = ['-g', '-o', perf_record_out.name]
 
 try:
-    subprocess.check_call(['/usr/bin/perf', 'record'] + args)
-except subprocess.CalledProcessError as ex:
-    sys.exit(ex.returncode) # user passed incorrect arguments to perf
+    perf_record = subprocess.Popen(['/usr/bin/perf', 'record'] + args)
+    try:
+        returncode = perf_record.wait()
+        if returncode != 0:
+            sys.exit(returncode) # user passed incorrect arguments to perf
+    except KeyboardInterrupt:
+        perf_record.wait()
+except OSError as ex:
+    sys.stderr.write("Is perf installed? " + ex.strerror + "\n")
+    sys.exit(1)
 
 print('Processing samples...')
 
