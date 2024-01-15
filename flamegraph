@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Pass arguments to perf-record (almost) as-is.
 #
@@ -6,7 +6,7 @@
 # public URI.
 #
 
-import sys, tempfile, subprocess, os, pwd, grp, json, urlparse
+import sys, tempfile, subprocess, os, pwd, grp, json, urllib.parse
 
 def bundled(util):
     return os.path.join(os.path.dirname(os.readlink(__file__) if os.path.islink(__file__) else __file__), util)
@@ -68,7 +68,7 @@ collapse_util = subprocess.Popen([
 samples, _ = collapse_util.communicate(perf_script_out)
 del perf_script_out
 
-if samples == '':
+if samples == b'':
     sys.stderr.write('no relevant samples captured, exiting\n')
     sys.exit(-1)
 
@@ -85,8 +85,8 @@ api_request = json.dumps({
     'description': title,
     'public': True,
     'files': {
-        'g.svg': {'content': svg},
-        'samples.txt': {'content': samples}
+        'g.svg': {'content': svg.decode('utf-8')},
+        'samples.txt': {'content': samples.decode('utf-8')}
     }
 })
 
@@ -94,16 +94,14 @@ upload_util = subprocess.Popen([
     '/usr/bin/curl', '-H', 'Authorization: token ' + api_token, '-sd', '@/dev/fd/0', 'https://api.github.com/gists'],
     stdin = subprocess.PIPE, stdout = subprocess.PIPE)
 
-api_response, _ = upload_util.communicate(api_request)
+api_response, _ = upload_util.communicate(bytes(api_request, 'utf-8'))
 
 try:
-    raw_url = json.loads(api_response)['files']['g.svg']['raw_url']
+    raw_url = json.loads(api_response.decode('utf-8'))['files']['g.svg']['raw_url']
 except KeyError:
     print(api_response)
     sys.exit(-1)
 
 # s/gist.githubusercontent.com/gist.githack.com/
 # github serves raw files as text/plain
-raw_url_parts = list(urlparse.urlparse(raw_url))
-raw_url_parts[1] = u'gist.githack.com'
-print(urlparse.urlunparse(raw_url_parts))
+print(urllib.parse.urlparse(raw_url)._replace(netloc=u'gist.githack.com').geturl())
